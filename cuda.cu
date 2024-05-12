@@ -8,7 +8,10 @@
 
 // Device kernel for calculating entropy within a window on the stream
 __global__ void shannon_entropy_window_kernel(const float* stream, float* entropies, int window_size, int start_index) {
-    //printf("Hello from block %d, thread %d\n", blockIdx.x, threadIdx.x);
+    /*
+    windows_size is being passed but is not being used.
+    maybe should replace STREAM_SIZE
+    */
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int idx = start_index + i;
     if (idx < STREAM_SIZE && idx >= start_index) {
@@ -41,14 +44,15 @@ int main(int argc, char* argv[]) {
     // Allocate memory on the device (GPU) for the stream and entropies
     float* stream_device;
     float* entropies_device;
-    cudaMalloc(&stream_device, STREAM_SIZE * sizeof(float));
+    //TODO: Here only a size of window_size is needed
+    cudaMalloc(&stream_device, STREAM_SIZE * sizeof(float));                        
     cudaMalloc(&entropies_device, (STREAM_SIZE - window_size + 1) * sizeof(float)); // Allocate for all possible window positions
 
     // Copy stream data from host to device
     cudaMemcpy(stream_device, stream_host, STREAM_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
     // Sliding window processing loop
-    for (int start_index = 0; start_index <= STREAM_SIZE - window_size; start_index+=window_size) {
+    for (int start_index = 0; start_index <= STREAM_SIZE - window_size; start_index++) {
         // Allocate memory on the device for temporary entropy results within a window
         float* temp_entropies_device;
         cudaMalloc(&temp_entropies_device, window_size * sizeof(float));
