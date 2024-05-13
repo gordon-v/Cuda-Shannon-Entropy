@@ -6,8 +6,7 @@
 
 #define THREADS_PER_BLOCK 256
 #define STREAM_SIZE 10 //up to size of input file
-#define BLOCK_SIZE 256
-#define NUM_BINS 257 //for histogram
+#define NUM_BINS 257 //for histogram ! Make sure this is (upper_limit+1), where upper_limit is the max possible number found in input_stream !
 
 
 __global__ void histogram(const int* input, int size, float* histogram) {
@@ -62,11 +61,14 @@ void loadArrayFromFile(int* arr, int N, const std::string& filename) {
 // Device kernel for calculating entropy within a window on the stream
 __global__ void shannon_entropy_window_kernel(const float* stream, float* entropies) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < STREAM_SIZE) {
+    if (i < NUM_BINS) {
         float p = stream[i];
-        float term = 0.0f;
+        float term;
         if (p > 0.0f) {
             term = -p * log2f(p);
+        }else
+        {
+           term = 0.0f;
         }
         atomicAdd(&entropies[i], term);
     }
@@ -89,17 +91,7 @@ int main(int argc, char* argv[]) {
    
     loadArrayFromFile(stream_host, STREAM_SIZE, "shannon-input.txt");
     
-    // Allocate memory on the device (GPU) for the stream and entropies
-    float* stream_device;
-    float* entropies_device;
-
-    //TODO: Here only a size of window_size is needed
-    // cudaMalloc(&stream_device, STREAM_SIZE * sizeof(float));                        
-    // cudaMalloc(&entropies_device, (STREAM_SIZE - window_size + 1) * sizeof(float)); // Allocate for all possible window positions
-
-    // // Copy stream data from host to device
-    // cudaMemcpy(stream_device, stream_host, STREAM_SIZE * sizeof(int), cudaMemcpyHostToDevice);
-
+  
     // Sliding window processing loop
     for (int start_index = 0; start_index <= STREAM_SIZE - window_size; start_index++) {
         //Allocate memory on the device for calculating a histogram of the window
@@ -124,12 +116,15 @@ int main(int argc, char* argv[]) {
 
         
         // Launch kernel to compute histogram
-        int numBlocks = (window_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        histogram<<<numBlocks, BLOCK_SIZE>>>(d_input, window_size, d_histogram);
+        int blocks = (window_size + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        histogram<<<blocks, THREADS_PER_BLOCK>>>(d_input, window_size, d_histogram);
 
+        /*
+        THIS COPY BACK IS ONLY FOR DEBUG CHECKING THE INTERMEDIARY RESULTS,
+        IT SHOULD BE REMOVED ONCE FINISHED
+        */
         // Copy histogram from device to host
         cudaMemcpy(h_histogram, d_histogram, NUM_BINS * sizeof(float), cudaMemcpyDeviceToHost);
-
         // Print histogram
         printf("Histogram:\n");
         for (int i = 0; i < NUM_BINS; ++i) {
@@ -138,33 +133,44 @@ int main(int argc, char* argv[]) {
 
         // Free device memory
         cudaFree(d_input);
-        cudaFree(d_histogram);
         // Free host memory
         delete[] h_input;
-        delete[] h_histogram;
+
+        //////////////////////////////////////////
+        //At this point in h_histogram, we have
+        //all the datapoints probabilities,
+        //calculated in their own bin
+        //////////////////////////////////////////
+
+
+        // Allocate memory on the device (GPU) for the entropy results
+        float* output_device;
+
+        //TODO: Here only a size of window_size is needed                      
+        cudaMalloc(&output_device, NUM_BINS * sizeof(float)); // Allocate for all possible window positions
+        cudaMemset(output_device, 0.0, NUM_BINS * sizeof(float));
+
+        // Launch the kernel for this window
+        shannon_entropy_window_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_histogram,output_device);
+
+        // Error checking
+        cudaDeviceSynchronize();
+
+        // Copy temporary entropy results from device to host
+        float* results = new float[NUM_BINS];
+        cudaMemcpy(results, output_device, NUM_BINS * sizeof(float), cudaMemcpyDeviceToHost);
         
-//////////////////////////////////////////
+        // Calculate final entropy by summing temporary results
+        float entropy = 0.0f;
+        printf("Intermediate results in:\n");
+        for (int i = 0; i < NUM_BINS; ++i) {
+            if(results[i]==0) continue;
+            printf("Bin %d: %f\n",i,results[i]);
+            entropy += results[i];
+        }
 
-        // // Launch the kernel for this window
-        // int blocks = (window_size + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-        
-        // shannon_entropy_window_kernel<<<blocks, THREADS_PER_BLOCK>>>(stream_device, temp_entropies_device, window_size, start_index);
-
-        // // Error checking
-        // cudaDeviceSynchronize();
-
-        // // Copy temporary entropy results from device to host
-        // float* temp_entropies_host = new float[window_size];
-        // cudaMemcpy(temp_entropies_host, temp_entropies_device, window_size * sizeof(float), cudaMemcpyDeviceToHost);
-        
-        // // Calculate final entropy by summing temporary results
-        // float entropy = 0.0f;
-        // for (int i = 0; i < window_size; ++i) {
-        //     entropy += temp_entropies_host[i];
-        // }
-
-        // // Process and potentially store entropy for this window (replace with your logic)
-        // std::cout << "Entropy for window starting at " << start_index << ": "<< entropy << std::endl;
+        // Process and potentially store entropy for this window (replace with your logic)
+        std::cout << "Entropy for window starting at " << start_index << ": "<< entropy << std::endl;
     }
 
     return 0;
