@@ -4,7 +4,7 @@
 #include <cstring>
 
 #define BLOCK_SIZE 256
-#define NUM_BINS 10
+#define NUM_BINS 101 //make sure that the number of bins is n+1, where n is the highest possible number in the input range
 
 
 __global__ void histogram(const int* input, int size, float* histogram) {
@@ -40,16 +40,16 @@ __global__ void histogram(const int* input, int size, float* histogram) {
 
 int main() {
     const int N = 10; // Size of the input array
-    int* h_input = new int[N];
+    int h_input[10] = {10, 20, 30, 40, 40, 50, 60, 71, 90, 100};
     float* h_histogram = new float[NUM_BINS];
     int* d_input;
     float* d_histogram;
 
     // Initialize input array with random integers
-    srand(time(nullptr));
-    for (int i = 0; i < N; ++i) {
-        h_input[i] = rand() % NUM_BINS; // Random integer between 0 and NUM_BINS-1
-    }
+    // srand(time(nullptr));
+    // for (int i = 0; i < N; ++i) {
+    //     h_input[i] = rand() % NUM_BINS; // Random integer between 0 and NUM_BINS-1
+    // }
 
     // Allocate device memory for input and histogram
     cudaMalloc(&d_input, N * sizeof(int));
@@ -79,7 +79,7 @@ int main() {
     cudaFree(d_histogram);
 
     // Free host memory
-    delete[] h_input;
+    //delete[] h_input;
     delete[] h_histogram;
 
     return 0;
